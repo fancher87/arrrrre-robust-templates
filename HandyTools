@@ -3,13 +3,28 @@
 df<-read.table("location.txt", sep =",", header = T )
 
 
-#KEEP columns by variable name# 
-dfnew<-df[, which( names(df) %in% c("var1","var3","var7"))]
-#DROP#
-dfnew<-df[,-which( names(df) %in% c("var1","var3","var7")))]
-  #OR#
-dfnew<-df[,!names(df) %in% c("var1","var3","var7")]
+#  KEEP columns by variable name # 
+    dfnew<-df[, which( names(df) %in% c("var1","var3","var7"))]
+#  DROP #
+    dfnew<-df[,-which( names(df) %in% c("var1","var3","var7")))]
+ # OR #
+    dfnew<-df[,!names(df) %in% c("var1","var3","var7")]
+
+#   MERGE TWO DATA FRAMES BY THE COLUMNS THAT EXIST IN BOTH!!!   #
+  df1_names<- data.table(c(colnames(df)))
+  dfnew_names<- data.table(c(colnames(dfnew)))
+
+  mergevars<-merge(df1_names,dfnew_names)
+  mergevars2<-unlist(list(mergevars)) 
+  is.vector(mergevars2)
+
+  keepfor2018<-merge(df,dfnew, by=c(mergevars2), all=TRUE )
+
+
+
 
 
 #NERD TIP: if you’re not sure if you have this package, you can run the following command to find out!
 any(grepl("<name of your package>", installed.packages()))
+
+

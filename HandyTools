@@ -4,9 +4,11 @@ df<-read.table("location.txt", sep =",", header = T )
 
 
 #KEEP columns by variable name# 
-df<-df[, which( names(df) %in% c("var1","var3","var7"))]
+dfnew<-df[, which( names(df) %in% c("var1","var3","var7"))]
 #DROP#
-df<-df[,-which( names(df) %in% c("var1","var3","var7")))]
+dfnew<-df[,-which( names(df) %in% c("var1","var3","var7")))]
+  #OR#
+dfnew<-df[,!names(df) %in% c("var1","var3","var7")]
 
 
 #NERD TIP: if you’re not sure if you have this package, you can run the following command to find out!

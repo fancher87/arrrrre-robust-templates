@@ -2,7 +2,7 @@
 #read table
 df<-read.table("location.txt", sep =",", header = T )
 
-
+######################################################################################
 #  KEEP columns by variable name # 
     dfnew<-df[, which( names(df) %in% c("var1","var3","var7"))]
 #  DROP #
@@ -19,7 +19,7 @@ df<-read.table("location.txt", sep =",", header = T )
   is.vector(mergevars2)
 
   keepfor2018<-merge(df,dfnew, by=c(mergevars2), all=TRUE )
-
+######################################################################################
 
 #cross join.  Add sequence of numbers to existing data frame.
         dow = list()
@@ -30,6 +30,9 @@ df<-read.table("location.txt", sep =",", header = T )
         }
         df_dow <- data.table::rbindlist(dow)
 
+
+# SUBSTITUTE ONE STRING FOR ANOTHER (gsub) #
+    df$var1<-gsub("-","_",var1)
 
 #NERD TIP: if you’re not sure if you have this package, you can run the following command to find out!
 any(grepl("<name of your package>", installed.packages()))

@@ -21,7 +21,14 @@ df<-read.table("location.txt", sep =",", header = T )
   keepfor2018<-merge(df,dfnew, by=c(mergevars2), all=TRUE )
 
 
+#cross join.  Add sequence of numbers to existing data frame.
+        dow = list()
 
+        for (i in 1:7) {
+          df$dow <- i
+          dow[[i]] <- df
+        }
+        df_dow <- data.table::rbindlist(dow)
 
 
 #NERD TIP: if you’re not sure if you have this package, you can run the following command to find out!

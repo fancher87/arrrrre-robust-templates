@@ -2,6 +2,9 @@
 #read table
 df<-read.table("location.txt", sep =",", header = T )
 
+#NON-scientific notation -- very annoying! ##
+options(scipen=999)
+
 ######################################################################################
 #  KEEP columns by variable name # 
     dfnew<-df[, which( names(df) %in% c("var1","var3","var7"))]

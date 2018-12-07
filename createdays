@@ -1,0 +1,41 @@
+rm(list = ls())
+gc()
+
+#import the 2018 File
+network_list<-read.csv(" ",header = T)
+head(network_list)
+
+#adding in the day of the week to make the new varaible names, of the format "net4434d1"
+# dow<-data.table(seq(1:7))
+dow = list()
+
+
+for (i in 1:7) {
+  network_list$dow <- i
+  dow[[i]] <- network_list
+}
+network_list_dow <- data.table::rbindlist(dow)
+
+
+colnames(network_list_dow)
+
+network_list_dow$net_dow<-gsub("-","_",paste("net",network_list_dow$network_no,"d",network_list_dow$dow,sep = ""))
+head(network_list_dow)
+
+# Read in sample dish data 
+dish<-read.table("H:/corpanalytics/efancher/Demo Refresh/Refresh2018/2018 Changes/Dish_sample_feb18_for_NETWORKDOW_coding.txt"
+                 , sep = "|" , header = T )
+
+dish_networks_dow<-dish[,!names(dish) %in% c("SelectionProb","SamplingWeight")]
+
+require(dplyr)
+require(data.table)
+
+dish_networks_dow$net_dow<-gsub("-","_",paste("net",dish_networks_dow$network_no,"d",dish_networks_dow$daypart_no,sep = ""))
+nonneg<-dish_networks_dow[dish_networks_dow$network_no>0 & dish_networks_dow$network_no<30, !names(dish_networks_dow) %in% c("network_no","daypart_no") ]
+
+help(cast)
+##########This one works################
+test_cast<-dcast(nonneg,  formula = headend_no+hh_no+hh_id+mso_no ~ net_dow ,  value.var="num_hours" , fill = 0)
+#########################################
+

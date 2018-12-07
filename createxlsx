@@ -1,0 +1,42 @@
+require(dplyr)
+require(xlsx)
+
+#Get names from Repo #
+repo_names<-c("stb_model","stb_model_no","hh_no","headend_no","num_hhs","num_hours")
+
+#read in repo data#
+models_live_live<-read.table("/home/efancher/work/Dish/model_live_view_echostar.txt",sep = "|", col.names = repo_names)
+models_dvr_live<-read.table("/home/efancher/work/Dish/model_live_view_echostar.txt",sep = "|", col.names = repo_names)
+models_live_dev<-read.table("/home/efancher/work/Dish/model_live_view_echostar_dev.txt",sep = "|", col.names = repo_names)
+models_dvr_dev<-read.table("/home/efancher/work/Dish/model_dvr_view_echostar_dev.txt",sep = "|", col.names = repo_names)
+
+models_live_live_sum <- models_live_live %>%
+  select(stb_model,stb_model_no,hh_no,headend_no,num_hhs,num_hours) %>%
+  group_by(stb_model,stb_model_no) %>%
+  summarise( num_hhs = sum(num_hhs), num_hours = sum(num_hours) )
+
+models_dvr_live_sum <- models_dvr_live %>%
+  select(stb_model,stb_model_no,hh_no,headend_no,num_hhs,num_hours) %>%
+  group_by(stb_model,stb_model_no) %>%
+  summarise( num_hhs = sum(num_hhs), num_hours = sum(num_hours) )
+
+models_live_dev_sum <- models_live_dev %>%
+  select(stb_model,stb_model_no,hh_no,headend_no,num_hhs,num_hours) %>%
+  group_by(stb_model,stb_model_no) %>%
+  summarise( num_hhs = sum(num_hhs), num_hours = sum(num_hours) )
+
+models_dvr_dev_sum <- models_dvr_dev %>%
+  select(stb_model,stb_model_no,hh_no,headend_no,num_hhs,num_hours) %>%
+  group_by(stb_model,stb_model_no) %>%
+  summarise( num_hhs = sum(num_hhs), num_hours = sum(num_hours) )
+
+#print(models_live_live_sum)
+#print(models_dvr_live_sum)
+#print(models_live_dev_sum)
+#print(models_dvr_dev_sum)
+ 
+write.xlsx(as.data.frame(models_live_live_sum),"/home/efancher/work/Dish/stb_hours_by_model_LiveDev.xlsx" , sheetName="models_live_live_sum", col.names=TRUE, row.names=FALSE, append=FALSE, showNA=FALSE)
+write.xlsx(as.data.frame(models_dvr_live_sum),"/home/efancher/work/Dish/stb_hours_by_model_LiveDev.xlsx" , sheetName="models_dvr_live_sum", col.names=TRUE, row.names=FALSE, append=FALSE, showNA=FALSE)
+write.xlsx(as.data.frame(models_live_dev_sum),"/home/efancher/work/Dish/stb_hours_by_model_LiveDev.xlsx" , sheetName="models_live_dev_sum", col.names=TRUE, row.names=FALSE, append=FALSE, showNA=FALSE)
+write.xlsx(as.data.frame(models_dvr_dev_sum),"/home/efancher/work/Dish/stb_hours_by_model_LiveDev.xlsx" , sheetName="models_dvr_dev_sum", col.names=TRUE, row.names=FALSE, append=FALSE, showNA=FALSE)
+

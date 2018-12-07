@@ -1,0 +1,188 @@
+
+############################
+######## SET-UP ############
+###########################
+# Read in appropriate libraries
+install.packages("DBI")
+library(DBI)
+library(RPostgreSQL)
+install.packages("maps")
+install.packages("ggplot2")
+library(ggplot2)
+library(maps)
+#install.packages("odbc")
+#install.packages("DBI")
+#install.packages("RPostgreSQL")
+require(RPostgreSQL)
+require(data.table)
+
+# Set up username and password
+
+# Set up list of databases
+dbs <- list().
+
+sql_q <- function(query,db=' ')
+{
+  db_info <- dbs[[db]]
+  drv <- dbDriver("PostgreSQL")
+  con <- dbConnect(drv,
+                   dbname = db_info$dbname,
+                   host = db_info$host,
+                   port = db_info$port,
+                   user = db_info$user,
+                   password = db_info$password)
+  df_postgres <- dbGetQuery(con, query)
+  dbDisconnect(con)
+  dbUnloadDriver(drv)
+  df_postgres
+}
+
+
+################################
+######## Map Set-up ########
+################################
+install.packages("maps")
+library(ggplot2)
+library(maps)
+#load us map data
+all_states <- map_data("state")
+#plot all states with ggplot
+p <- ggplot()
+p <- p + geom_polygon( data=all_states, aes(x=long, y=lat, group = group),colour="white", fill="grey10" )
+p
+#if you want to only show some states, you can filter like this
+states <- subset(all_states, region %in% c( "washington", "oregon", "california", "idaho", "nevada", "utah", "arizona", "montana" ) )
+p2 <- ggplot()
+p2 <- p2 + geom_polygon( data=states, aes(x=long, y=lat, group = group),colour="white", fill="grey10" )
+p2
+
+
+#Bring in some interesting data to map. In this case CTRBCs at the market level for a week in September.
+mkts <- sql_q("select * from ma_tv_markets")
+ctrbcs <- sql_q("select week, tv_market_no, sum(num_hhs) as ctrbc
+                from fwtwk
+                where week = '09-11-2017' group by 1,2 order by 1,2")
+#rename columns to more easily match up later
+colnames(mkts)[12] = "lat"
+colnames(mkts)[13] = "long"
+#Merge CTRBCs with markets to get latitude and longitude
+mkts_ctrbcs <- merge(mkts[c("tv_market_no", "name", "lat", "long")], ctrbcs, by="tv_market_no")
+
+############################
+######## Map #3 ########
+############################
+#Graph CTRBCs on a map
+p3 <- ggplot()
+p3 <- p3 + geom_polygon( data=states, aes(x=long, y=lat, group = group),colour="white" )
+p3 <- p3 + geom_point( data=mkts_ctrbcs, aes(x=long, y=lat, size = ctrbc), color="coral1") + scale_size(name="Total CTRBCs")
+#Add market_no labels
+p3 <- p3 + geom_text( data=mkts_ctrbcs, hjust=0.5, vjust=-0.5, aes(x=long, y=lat, label=tv_market_no), colour="gold2", size=4 )
+p3
+
+############################
+######## Map #4 ########
+############################
+#This is a lot of data, let's remove Alaksa and Hawaii to "zoom in" on the map.
+library(data.table)
+library(dplyr)
+no_ak_ha <- filter(mkts_ctrbcs,!tv_market_no %in% c("743", "744", "745", "747"))
+#Graph CTRBCs on a map, removing Alaska and Hawaii
+p4 <- ggplot()
+p4 <- p4 + geom_polygon( data=states, aes(x=long, y=lat, group = group),colour="white" )
+p4 <- p4 + geom_point( data=no_ak_ha, aes(x=long, y=lat, size = ctrbc), color="coral1") + scale_size(name="Total CTRBCs")
+p4
+
+############################
+####### Map #5-7 #######
+############################
+#Let's focus on the West Coast by using a filter on longitude.
+west_coast <- subset(mkts_ctrbcs, long > -125 & long < -110)
+#Graph CTRBCs on a map, removing Alaska and Hawaii
+p5 <- ggplot()
+p5 <- p5 + geom_polygon( data=states, aes(x=long, y=lat, group = group),colour="white" )
+p5 <- p5 + geom_point( data=west_coast, aes(x=long, y=lat, size = ctrbc), color="coral1") + scale_size(name="Total CTRBCs")
+#Add tv_market_no labels
+p6 <- p5 + geom_text( data=west_coast, hjust=0.5, vjust=-0.5, aes(x=long, y=lat, label=tv_market_no), colour="gold2", size=4 )
+p6
+#Add market_name labels
+p7 <- p5 + geom_text( data=west_coast, hjust=0.5, vjust=-0.5, aes(x=long, y=lat, label=name), colour="gold2", size=4 )
+p7
+
+
+############################
+######## Map #8 ########
+############################
+#Let's look at this data by mso.
+mso_ctrbcs <- sql_q("select week, mso_no, tv_market_no, sum(num_hhs) as ctrbc
+                    from five_week_usage_by_mso_market_week
+                    where week = '09-11-2017' group by 1,2,3 order by 1,2,3")
+#Merge CTRBCs with markets to get latitude and longitude
+mkts_mso_ctrbcs <- merge(mkts[c("tv_market_no", "name", "lat", "long")], mso_ctrbcs, by="tv_market_no")
+no_akha_mso_ctrbcs <- filter(mkts_mso_ctrbcs,!tv_market_no %in% c("743", "744", "745", "747"))
+#Define a function for graphing by mso.
+#Specify min and max longitude, note that mainland U.S. is approximately -125 to -65.
+mso_map <- function(msono, mso_name, min_long, max_long)
+{
+  mso_name <- subset(mkts_mso_ctrbcs, mso_no == msono & long > min_long & long < max_long)
+  mmap <- ggplot()
+  mmap <- mmap + geom_polygon( data=subset(all_states,long > min_long & long < max_long), aes(x=long, y=lat, group = group),colour="white" ) + coord_fixed(1.3)
+  mmap <- mmap + geom_point( data=mso_name, aes(x=long, y=lat, size = ctrbc), color="coral1") + scale_size(name="Total CTRBCs")
+  mmap <- mmap + geom_text( data=mso_name, hjust=0.5, vjust=-0.5, aes(x=long, y=lat, label=name), colour="gold2", size=4 )
+  mmap
+}
+p8_att_map <- mso_map(1, att, -125, -65)
+p8_att_map
+
+
+############################
+######## Map #9 ########
+############################
+#Graph CTRBCs by color-coding mso's.
+p9 <- ggplot()
+p9 <- p9 + geom_polygon( data=all_states, aes(x=long, y=lat, group = group),colour="white" )
+p9 <- p9 + geom_jitter( data=no_akha_mso_ctrbcs, position=position_jitter(width=0.5, height=0.5), aes(x=long, y=lat, size = ctrbc, colour=factor(mso_no))) + scale_size(name="Total CTRBC")
+p9
+#p9 <- p9 + geom_text( data=no_akha_mso_ctrbcs, hjust=0.5, vjust=-0.5, aes(x=long, y=lat, label=name), colour="gold2", size=4 )
+p9
+
+
+###########################
+#  Emily's Adjustment#
+###########################
+vbhpm = sql_q(query="select month,headend_no,v.postal_code,num_hours,num_stbs,num_hhs,latitude as lat, h.mso_no, longitude as long ,p.state_id, h.population,
+num_hours/num_stbs as hrs_stb, num_hours/num_hhs as hrs_hh
+from views_by_headend_postal_code_month v 
+inner join ma_postal_codes p using(postal_code) 
+inner join headends h using (headend_no)
+where month in ('2017-09-01') and linear_is_in_range('2017-09-01',summarize_from_date,summarize_to_date)")
+Devonshire <- read.csv("H:/corpanalytics/efancher/R Stuff/Rentrak Demographics - 2017.csv") 
+head(Devonshire)
+colnames(Devonshire)
+keep <- c("ZIP.Code","X2017.Population","X2017.Households")
+Dev2 = Devonshire[keep]
+
+dev_vbhpm = merge(Dev2,vbhpm , by.x = "ZIP.Code" , by.y = "postal_code"  )
+
+dev_vbhpm<- transform(dev_vbhpm, num_hours_pop=(num_hours/X2017.Population))
+head(dev_vbhpm)
+
+summary(dev_vbhpm)
+quantile(dev_vbhpm$num_hours_pop,probs = c(0, 0.25, 0.5, 0.75, 1))
+s1<-c(dev_vbhpm$num_hours_pop)
+q1<-quantile(s1,probs=c(85)/100)
+q1
+dense <- subset(dev_vbhpm, num_hours_pop > q1 & long > -125 & mso_no %in% c(1,114,12,104) )
+
+
+
+#########################
+#emily's maps
+########################
+p10 <- ggplot()
+p10 <- p10 + geom_polygon( data=all_states, aes(x=long, y=lat, group = group),colour="white" )
+p10 <- p10 + geom_jitter( data=dense, position=position_jitter(width=0.5, height=0.5), aes(x=long, y=lat, size = num_hours_pop, colour=factor(mso_no))) + scale_size(name="Hours per Population")
+p10
+#p9 <- p9 + geom_text( data=no_akha_mso_ctrbcs, hjust=0.5, vjust=-0.5, aes(x=long, y=lat, label=name), colour="gold2", size=4 )
+
+
+#choroplethr

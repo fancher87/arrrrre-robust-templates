@@ -1,0 +1,276 @@
+---
+title: 'Efficient R Code Part 2: Efficient Data Manipulation'
+output:
+  html_document: default
+  html_notebook:
+    highlight: tango
+    theme: flatly
+---
+
+`r Sys.Date()`
+
+Qingyun Luo
+
+## Intro
+- Two types of data manipulaiton efficiency
+- Daily data manipulation tasks: 
+    - reshape/data tidying (wide to long/long to wide)
+    - split-apply-combine (data aggreation/group by)
+        - base R vs. [Tidyverse](https://www.tidyverse.org/) (`dplyr` + `tidyr`) vs. `data.table` 
+        - examples and practices
+- Tidyverse vs. data.table vs. base R
+
+Credits: 
+
+- [Chapter 6: Efficient data carpentry](https://csgillespie.github.io/efficientR/data-carpentry.html) in the book - **Efficient R Programming** 
+- StackOverflow discussion about [dplyr and Data.Table](https://stackoverflow.com/questions/21435339/data-table-vs-dplyr-can-one-do-something-well-the-other-cant-or-does-poorly)
+
+## Two Types of Efficiency
+- Efficiency in converting ideas into codes
+    - Expressive & friendly syntax 
+    - Faster iterations (easy to write, understand and share)
+
+- Efficiency in speed: shorter runtime
+
+## Daily Data Manipulation Tasks
+
+Data manipulation takes a very important role in the full data science cycle! 
+
+![](img/ds_cycle.PNG)
+
+- Data reshaping: happens during data tidying stage
+    - transpose data from wide to long or long to wide
+- Split-apply-combine: during in data aggregation stage
+    - summary statistics by groups
+
+### Examples of data reshaping - Wide to long
+
+Wide data are usually messy data where data fields are actually values of a variable. Data coming from excel spreadsheets or summary tables are usually in wide format. Tidying the data set at the begining greatlly bring efficiency in follow up analysis. 
+
+```{r}
+# generate a random data frame for three stocks with price by dates
+stocks <- data.frame(
+  date = as.Date('2009-01-01') + 0:9,
+  stock_X = rnorm(10, 0, 1),
+  stock_Y = rnorm(10, 0, 2),
+  stock_Z = rnorm(10, 0, 4)
+)
+
+class(stocks)
+stocks
+```
+
+1. Use `tidyr::gather()` function to reshape data from wide format to long format
+```{r, message=FALSE, warning=FALSE}
+library(tidyr)
+library(dplyr)
+
+# reshape from wide to long
+gather(stocks, key = stock, value = price, stock_X, stock_Y, stock_Z)
+
+# altered syntax for more efficiency
+# use ":"" to select from one var to another var
+gather(stocks, key = stock, value = price, stock_X : stock_Z)
+
+# use contains() to select var with specific text pattern
+gather(stocks, key = stock, value = price, contains("stock"))
+
+# use - to deselect vars: select all vars except `date`
+gather(stocks, key = stock, value = price, - date)
+```
+
+The above codes read like the following: "gather columns from `stock_X` to `stock_Z` and present them into key-value paris called `stock` and `price`. 
+
+2. Use `data.table::melt()` function:
+
+`data.table::melt()` is an extenstion of `reshape::melt()` written in C for speed and memory efficiency.
+
+```{r, message=FALSE, warning=FALSE}
+library(data.table)
+
+# convert stocks data frame to a data.table object
+stocks.dt <- data.table(stocks)
+
+class(stocks.dt)
+stocks.dt
+
+# convert stocks_dt from wide to long with melt()
+data.table::melt(stocks.dt, 
+                 measure.vars = c("stock_X", "stock_Y", "stock_Z"),
+                 variable.name = "stock", value.name = "price")
+
+# have to use column index but not column name to select a sequence of vars 
+data.table::melt(stocks.dt, 
+                 measure.vars = c(2 : 4),
+                 variable.name = "stock", value.name = "price")
+```
+
+3. Use base R `stats::reshape()`function:
+
+```{r}
+reshape(stocks, 
+        idvar = "date", 
+        varying = c("stock_X", "stock_Y", "stock_Z"), 
+        v.names = "price", 
+        timevar = "stock", times = c("stock_X", "stock_Y", "stock_Z"),
+        direction = "long")
+```
+
+### Examples of Split-Apply-Combine (data summary)
+
+Use the iris data set comes with R as an example, we want summarzie mean of `Sepal.Length` by `Species`:
+
+```{r}
+head(iris)
+str(iris)
+
+# summary length by species
+
+# use simple base R functions
+stack(                                          # COMBINE - many ways to do this
+  lapply(                                       # APPLY
+    split(iris$Sepal.Length, iris$Species),     # SPLIT
+    mean                                        # Computation to apply
+  ) )
+```
+
+1. Use `dplyr` functions for the same example 
+
+```{r}
+# functional interface, read from inside to outside
+summarise(
+    group_by(iris, Species), AvgLength = mean(Sepal.Length)
+)
+
+
+# using %>% to facilitae readability
+iris %>% 
+    group_by(Species) %>% 
+    summarise(AvgLength = mean(Sepal.Length))
+```
+
+2. Use `data.table` syntax for the same example
+
+```{r}
+# convert iris to data.table object
+iris.dt <- data.table(iris)
+
+# data.table use [] syntax for most data processing work it supports
+iris.dt[, list(AvgLength = mean(Sepal.Length)), by = Species]
+
+# "list" can be replaced with "." for column selection and operation 
+iris.dt[, .(AvgLength = mean(Sepal.Length)), by = Species]
+```
+
+3. Other base R implementations
+
+```{r}
+# with tapply
+tapply(X = iris$Sepal.Length, INDEX = iris$Species, FUN = mean)
+
+# with aggregate
+aggregate(x = iris["Sepal.Length"], by = iris["Species"], FUN = mean)  
+```
+
+Overall, Tidyverse `tidyr + dplry` has more effient/easier to read syntax style over `data.table` and `Base R` syntax.  
+
+### Practices
+
+- Pull one week of data from `views_by_network_day_15_minute_segment`
+- Tidying the data set into the following structure `network_no | day | 15_min_seg | hours`
+- Summarize by day, by netowork, by network or day for average hours
+
+```{r, message=FALSE, warning=FALSE}
+library(DBI)
+library(RPostgreSQL)
+
+# rentrak vpn needed even in comScore NY office
+con <- dbConnect(PostgreSQL(),
+                 dbname = "linear_national_live_webdb1_replica",
+                 host = "linlivenationalwebdb1",
+                 port = 5432,
+                 user = "linear_national",
+                 password = "thavab3P8bra")
+
+# query db and save object to R
+vbnd15 <- dbGetQuery(
+con, 
+"
+select network_no, day, num_hours
+from views_by_network_day_15_minute_segment
+where day between '2018-02-05' and '2018-02-11'
+order by network_no, day
+")
+
+# close db connection
+dbDisconnect(con)
+```
+
+Basic data check and pre-processing before tidying:
+```{r, message=FALSE, warning=FALSE}
+glimpse(vbnd15)
+head(vbnd15)
+
+unique(vbnd15$day)
+
+library(stringr)
+
+# replace "{" & "}" to "" and separate num_hours string by ","
+vbnd15_sep <- vbnd15 %>% 
+    mutate(num_hours_rep = str_replace_all(num_hours, c("\\{" = "", "\\}" = ""))
+           ) %>% 
+    select(-num_hours) %>% 
+    separate(num_hours_rep, into = paste("qhr_seg", 1:96, sep = "_"),  sep = ",", remove = TRUE)
+
+
+vbnd15_sep
+```
+
+
+Now please put your code here to reshape `vbnd15_sep` from Wide to Long and call it `vbnd15_long`. Convert `qhr_seg_1` to `qhr_seg_96` to key value pairs called "qhr_seg", "num_hours". 
+```{r}
+# your code here, use tidyr::gather
+vbnd15_long <- vbnd15_sep %>% 
+    gather(key = 
+           value =  
+           )
+
+
+# your code here, use data.table::melt
+vbnd15_sep.dt <- data.table(vbnd15_sep) 
+
+vbnd15_long.dt <- data.table::melt(vbnd15_sep.dt, 
+                 measure.vars = c(),
+                 variable.name = "", value.name = "") 
+
+```
+
+Now let's take `vbnd15_long` and summarize average hours of across qhr segments by day and network
+```{r}
+
+# your code here, using dplyr::group_by and dplyr::summarise functions 
+vbnd15_long %>% 
+    group_by(network_no, day) %>% 
+    summarise()
+
+# your code here using data.table function
+vbnd15_long.dt[, .list(), by = ]
+```
+
+If we have more time, let's timing codes written with tidyr + dplyr vs. codes written with data.table. 
+
+
+## Tidyverse (dplyr + tidyr) vs. Data.Table vs. Base R
+
+1. Both Tidyverse and Data.Table are faster than Base R 
+![](img/vs.base.PNG)
+
+2. Data.Table is faster than Tidyverse (dplyr) especially for grouping operations 
+![](img/grouping.1E9.png)
+
+For more benchmark results, see here: https://github.com/Rdatatable/data.table/wiki/Benchmarks-%3A-Grouping
+
+
+## Recap for Today
+- Use either Tidyverse or Data.Table for your general data manipulation tasks
+- You won't see a significant speed difference working with medium size data between dyplr and data.table

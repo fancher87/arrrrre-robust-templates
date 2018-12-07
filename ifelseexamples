@@ -1,0 +1,306 @@
+rm(list = ls())
+gc()
+
+install.packages("odbc")
+install.packages("DBI")
+install.packages("RPostgreSQL")
+require(RPostgreSQL)
+require(data.table)
+usr <- {''}
+pw <- {''}
+
+
+dbs <- list()
+
+dbs$`2day` <- list(dbname="",host="s ",port=5432,user=usr,password=pw)
+dbs$national <- list(dbname=" ",host=" ",port=5432,user=usr,password=pw)
+dbs$dish <- list(dbname="",host=" ",port=5437,user=usr,password=pw)
+dbs$directv <- list(dbname="",host=" ",port=5432,user=usr,password=pw)
+dbs$charter <- list(dbname=" ",host=" ",port=5435,user=usr,password=pw)
+dbs$cox <- list(dbname=" ",host=" ",port=5432,user=usr,password=pw)
+dbs$att <- list(dbname=" ",host=" 2",port=5434,user=usr,password=pw)
+
+
+
+sql_q <- function(query,db='2day')
+{
+  
+  db_info <- dbs[[db]]
+  
+  drv <- dbDriver("PostgreSQL")
+  
+  con <- dbConnect(drv,
+                   dbname=db_info$dbname,
+                   host=db_info$host,
+                   port=db_info$port,
+                   user=db_info$user,
+                   password=db_info$password)
+  
+  df_postgres <- dbGetQuery(con, query)
+  
+  dbDisconnect(con)
+  dbUnloadDriver(drv)
+  
+  df_postgres
+  
+}
+
+vbhsd<-sql_q("select day, network_no, sum(num_hours) as num_hours, he.mso_no  , nt.short_name  as short_name
+		from  views_by_headend_station_day vi
+        inner join headends he using (headend_no) 
+        inner join networks nt using (network_no) 
+        where vi.day>=('2018-02-26') 
+        and vi.day<=('2018-03-25')
+        group by day, network_no,  he.mso_no , nt.short_name")
+#disconnect from database.
+# dbDisconnect(con)
+#install.packages("lubridate")
+require(lubridate)
+help(wday)
+vbhsd$weekday<-ifelse(wday(vbhsd$day)==1,6,wday(vbhsd$day)-2)
+
+
+#confimred this worked.
+
+
+
+
+#  install.packages("sqldf")
+require(sqldf)
+library(sqldf)
+
+
+
+net_counts<-sqldf("select  network_no 
+                     ,short_name 
+                     ,sum(Dish) as Dish
+                  ,sum(Charter) as Charter
+                  ,sum(Directv) as Directv
+                  ,sum(Cox) as Cox
+                from (select network_no, short_name 
+                  ,case when mso_no in (4) then num_hours else 0 end as Dish
+                  ,case when mso_no in (12,104) then num_hours else 0 end as Charter
+                  ,case when mso_no in (102) then num_hours else 0 end as Directv
+                  ,case when mso_no in (114) then num_hours else 0 end as Cox
+                  from vbhsd ) as foo
+                  group by network_no ,short_name
+                having sum(Dish) > 0 and sum(Directv) > 0 and sum(Cox) > 0 and sum(Charter) > 0", 
+                  dbname="linear_national_live_research2day",host="statdevprivatedb2",port=5432,user=usr,password=pw )
+
+
+
+head(net_counts)
+# help("trimws")
+# net_counts$net<-ifelse(net_counts$network_no<0,paste('_',abs(net_counts$network_no)), net_counts$network_no) #doesn't work
+
+#Select networks in "net_counts" and concatenate with day of week
+require(data.table)
+network_list<- data.table(net_counts$network_no,net_counts$short_name)
+colnames(network_list)<-c("network_no","network_name2018")
+head(network_list)
+
+summary(net_counts)
+
+#Categories from the database
+categories<-sql_q("select n.network_no,n.name, n.short_name ,c.category_no,c.name as Database_Categories from networks_categories left join networks n using (network_no) left join categories 
+                    c using (category_no) where network_no in (select network_no   from networks where linear_is_in_range ('2018-03-01',summarize_from_date,summarize_to_date))")
+head(categories)
+colnames(categories)<-tolower(colnames(categories))
+###########################################################################################################################
+#Get old category listings from AS
+cat_lookup<-read.table(" Lookup.txt", 
+                       sep =",", header = T )
+colnames(cat_lookup)<-tolower(colnames(cat_lookup)) #rename columns
+
+#merge cat_lookup to network_list 
+net_dow_cat_ls<-merge(cat_lookup,network_list, by = "network_no", all = TRUE)
+
+#Make sure they look like you were expecting.
+head(net_dow_cat_ls,1)
+tail(net_dow_cat_ls,2)
+
+#Subset to get the networks that didn't match up to Qs predefined categories.
+no_cats<-net_dow_cat_ls[rowSums(is.na(net_dow_cat_ls)) > 0,]
+head(no_cats,5)
+
+#write.csv(no_cats, " g_Category.csv")
+
+#
+#rename columns
+
+#Check all hours for networks that could be in for 2018. 
+chk_ALL<-sqldf("select  network_no 
+                     ,short_name 
+                  ,sum(Dish) as Dish
+                  ,sum(Charter) as Charter
+                  ,sum(Directv) as Directv
+                  ,sum(Cox) as Cox
+                  from (select network_no, short_name 
+                  ,case when mso_no in (4) then num_hours else 0 end as Dish
+                  ,case when mso_no in (12,104) then num_hours else 0 end as Charter
+                  ,case when mso_no in (102) then num_hours else 0 end as Directv
+                  ,case when mso_no in (114) then num_hours else 0 end as Cox
+                  from vbhsd ) as foo
+                  group by network_no ,short_name", 
+               dbname="linear_national_live_research2day",host="statdevprivatedb2",port=5432,user=usr,password=pw )
+
+#Output hours from above to sheet. for analysis.  Included in "Investigate_missing_categories_2018_2016.csv"
+#   write.csv(chk_ALL, "H:/corpanalytics/efancher/Demo Refresh/Refresh2018/2018 Changes/chk_ALL.csv")
+# rm(not_in_2016)
+
+#identify which networks don't exist in which list.
+not_in_2016<-net_dow_cat_ls[is.na(net_dow_cat_ls$network_name),]
+not_in_2018<-net_dow_cat_ls[is.na(net_dow_cat_ls$network_name2018),]
+write.csv(not_in_2016,"H:/corpanalytics/efancher/Demo Refresh/Refresh2018/2018 Changes/not_in_2016.csv", row.names = F)
+write.csv(not_in_2018,"H:/corpanalytics/efancher/Demo Refresh/Refresh2018/2018 Changes/not_in_2018.csv", row.names = F)
+#Make categories associated with "not_in_2016" -- transpose and make them into a similar thing to AS cats. 
+not_in_2016<-merge(not_in_2016,categories, by="network_no")
+colnames(not_in_2016)
+not_in_2016<-not_in_2016[, which( names(not_in_2016) %in% c("network_no","network_name2018","network_name2018","name","short_name","category_no","database_categories"))]
+not_in_2016$database_categories<-tolower(not_in_2016$database_categories)
+head(not_in_2016)
+#all_netwk_cats_2018<- net_dow_cat_ls[!is.na(net_dow_cat_ls$network_name),which(names(net_dow_cat_ls) %in% c("network_no","network_name2018","network_name2018","name","short_name","category_no","database_categories"))]
+################Tzry this -- decided to look only at the new stations.... 
+not_in_2016$animation<- ifelse( not_in_2016$database_categories=="animation" , 1 , 0)
+not_in_2016$artsculturehistory<- ifelse( not_in_2016$database_categories=="arts/culture/history" , 1 , 0)
+not_in_2016$broadcastmajor<- ifelse( not_in_2016$database_categories=="broadcast (major)" , 1 , 0)
+not_in_2016$broadcastother<- ifelse( not_in_2016$database_categories=="broadcast (other)" , 1 , 0)
+not_in_2016$cable<- ifelse( not_in_2016$database_categories=="cable" , 1 , 0)
+not_in_2016$cableother<- ifelse( not_in_2016$database_categories=="cable (other)" , 1 , 0)
+not_in_2016$childrenfamily<- ifelse( not_in_2016$database_categories=="children & family" , 1 , 0)
+not_in_2016$comedy<- ifelse( not_in_2016$database_categories=="comedy" , 1 , 0)
+not_in_2016$cooking<- ifelse( not_in_2016$database_categories=="cooking" , 1 , 0)
+not_in_2016$educationlearning<- ifelse( not_in_2016$database_categories=="education/learning" , 1 , 0)
+not_in_2016$generalentertainment<- ifelse( not_in_2016$database_categories=="general entertainment" , 1 , 0)
+not_in_2016$hispaniclatino<- ifelse( not_in_2016$database_categories=="hispanic/latino" , 1 , 0)
+not_in_2016$lifestyle<- ifelse( not_in_2016$database_categories=="lifestyle" , 1 , 0)
+not_in_2016$matureaudience<- ifelse( not_in_2016$database_categories=="mature audience" , 1 , 0)
+not_in_2016$movies<- ifelse( not_in_2016$database_categories=="movies" , 1 , 0)
+not_in_2016$multiculturalforeignlanguage<- ifelse( not_in_2016$database_categories=="multicultural/foreign language" , 1 , 0)
+not_in_2016$music<- ifelse( not_in_2016$database_categories=="music" , 1 , 0)
+not_in_2016$newsbusinessinfo<- ifelse( not_in_2016$database_categories=="news/business/info" , 1 , 0)
+not_in_2016$premiumnetworks<- ifelse( not_in_2016$database_categories=="premium networks" , 1 , 0)
+not_in_2016$regionalsports<- ifelse( not_in_2016$database_categories=="regional sports" , 1 , 0)
+not_in_2016$religious<- ifelse( not_in_2016$database_categories=="religious" , 1 , 0)
+not_in_2016$sciencetechnology<- ifelse( not_in_2016$database_categories=="science/technology" , 1 , 0)
+not_in_2016$shopping<- ifelse( not_in_2016$database_categories=="shopping" , 1 , 0)
+not_in_2016$southasian<- ifelse( not_in_2016$database_categories=="south asian" , 1 , 0)
+not_in_2016$sports<- ifelse( not_in_2016$database_categories=="sports" , 1 , 0)
+
+dim(not_in_2016)
+#sum across the network no so that the values aren't being repeated.  need one row per network, not the number of categories it appears in.
+
+#  test<-aggregate.data.frame(not_in_2016, c("network_no","network_name2018","network_name2018","name","short_name","category_no","database_categories"), sum)
+require(dplyr)
+
+# test<-aggregate(not_in_2016,by= c("network_no","network_name2018","name","short_name","category_no","database_categories"), FUN=sum)    #"network_no","network_name2018","network_name2018","name","short_name","category_no","database_categories"      
+group<-c("network_no","network_name2018","name","short_name")
+#get unique record by network no
+# not_in_2016 <- not_in_2016 %>%
+#   select(network_no,network_name2018,name,short_name,animation,artsculturehistory,broadcastmajor,broadcastother,cable,cableother,childrenfamily,comedy,cooking,educationlearning,generalentertainment,hispaniclatino,lifestyle,matureaudience,movies,multiculturalforeignlanguage,music,newsbusinessinfo,premiumnetworks,regionalsports,religious,sciencetechnology,shopping,southasian,sports) %>%
+#     group_by(network_no,network_name2018,name,short_name) %>%
+#     summarise(animation = sum(animation), artsculturehistory = sum(artsculturehistory), broadcastmajor = sum(broadcastmajor), broadcastother = sum(broadcastother), cable = sum(cable), cableother = sum(cableother), childrenfamily = sum(childrenfamily), comedy = sum(comedy), cooking = sum(cooking), educationlearning = sum(educationlearning), generalentertainment = sum(generalentertainment), hispaniclatino = sum(hispaniclatino), lifestyle = sum(lifestyle), matureaudience = sum(matureaudience), movies = sum(movies), multiculturalforeignlanguage = sum(multiculturalforeignlanguage), music = sum(music), newsbusinessinfo = sum(newsbusinessinfo), premiumnetworks = sum(premiumnetworks), regionalsports = sum(regionalsports), religious = sum(religious), sciencetechnology = sum(sciencetechnology), shopping = sum(shopping), southasian = sum(southasian), sports = sum(sports))
+#can probably adjust this for to match Q's categories.#
+not_in_2016 <- not_in_2016 %>%
+  select(network_no,network_name2018,name,short_name,animation,artsculturehistory,broadcastmajor,broadcastother,cable,cableother,childrenfamily,comedy,cooking,educationlearning,
+         generalentertainment,hispaniclatino,lifestyle,matureaudience,movies,multiculturalforeignlanguage,music,newsbusinessinfo,premiumnetworks,regionalsports,religious,sciencetechnology,
+         shopping,southasian,sports) %>%
+  group_by(network_no,network_name2018,name,short_name) %>%
+  summarise(animation = sum(animation), artsculthis = sum(artsculturehistory), broadcastmajor = sum(broadcastmajor), broadcastother = sum(broadcastother),
+            cable = sum(cable), cableother = sum(cableother), childfamily = sum(childrenfamily), comedy = sum(comedy), cooking = sum(cooking), education = sum(educationlearning), 
+            genentertain = sum(generalentertainment), hispanic = sum(hispaniclatino), lifestyle = sum(lifestyle), mature = sum(matureaudience), movies = sum(movies), 
+            multicult = sum(multiculturalforeignlanguage), music = sum(music), newsbusiness = sum(newsbusinessinfo), premiumnetworks = sum(premiumnetworks), 
+            religious = sum(religious), scitech = sum(sciencetechnology), shopping = sum(shopping), southasian = sum(southasian), 
+            sports = max(sports,regionalsports))
+###############################################################################################################################################################################################################################
+
+inboth<- net_dow_cat_ls[!is.na(net_dow_cat_ls$network_name) &  !is.na(net_dow_cat_ls$network_name2018),]    
+#removing the values from the network/category file that is missing the 2016 & 2018 network names.    
+#These are the networks that exist on all operators and are consistent with Q's sheet from years back. we want to kepe these consistent.
+inboth_names<- data.table(c(colnames(inboth)))
+not_in_2016_names<- data.table(c(colnames(not_in_2016)))
+mergevars<-merge(inboth_names,not_in_2016_names)
+mergevars2<-unlist(list(mergevars)) 
+is.vector(mergevars2)
+#Get list of 2018 new networks with Categories from database + List of matched networks from 2016 with the categories from AS
+#The overlap should be the columns that match up.  definitely need to keep those columns.  For the other columns, we need *DONT REMEMBER WHAT I WAS GOING TO WRITE HERE WHOOPS#
+help(unlist)
+colnames(not_in_2016)
+keepfor2018<-merge(inboth,not_in_2016, by=c(mergevars2), all=TRUE )
+colnames(keepfor2018)
+
+#Get new networks listed for 2018.  Try to figure out how to categorize them for 2018. 
+new_network_no <- data.frame(not_in_2016$network_no)
+colnames(new_network_no)<- "network_no"
+new_network_no_cat<-merge(categories,new_network_no, by="network_no") #merge them to the database categories list to get an approx for the AS list
+head(new_network_no_cat) #
+# View(new_network_no_cat)
+
+
+#Have to transpose and sum net_dow_cat_ls to get something that looks similar for AS Data
+
+net_dow_cat_ls_sum<-net_dow_cat_ls[, -which( names(net_dow_cat_ls) %in% c("network_no","network_name","network_name2018"))]   #summing
+net_dow_cat_ls_sum[is.na(net_dow_cat_ls_sum)]<-0 #make NA's 0 so they can be summed for comparison
+head(net_dow_cat_ls_sum)
+
+#Compare AS to Database
+table(new_network_no_cat$database_categories) #frequencies to compare database to 
+transposetry<-data.frame(t(colSums(net_dow_cat_ls_sum)))  #frequencies to compare database to AS's categorizations
+
+#look at the overlap?
+#install.packages("XLConnect")
+require("XLConnect")
+
+outDir<-setwd(" 2018 Changes/")
+outDir<-"H:/corpanalytics/efancher/Demo Refresh/Refresh2018/2018 Changes/"
+fileXls <- paste(outDir,"Compare AS to Database March2018.xlsx",sep='/')
+unlink(fileXls, recursive = FALSE, force = FALSE)
+exc <- loadWorkbook(fileXls, create = TRUE)
+createSheet(exc,'database_categories')
+createSheet(exc,'AS_categories')
+createSheet(exc,'keepfor2018')
+saveWorkbook(exc)
+
+input <- data.frame(table(categories$database_categories))
+#subit<- net_dow_cat_ls[names(net_dow_cat_ls) %in% c("network_no","network_name2018","network_name")] #keep columns with the name %in% list. ! before names <- drop those columns
+writeWorksheet(exc, input, sheet = "database_categories", startRow = 1, startCol = 1)
+writeWorksheet(exc, keepfor2018, sheet = "keepfor2018", startRow = 1, startCol = 1) #this sheet needs to be summarized - see above 3/20/2018
+writeWorksheet(exc, transposetry, sheet = "AS_categories", startRow = 1, startCol = 1)
+#input2 <- data.frame(colSums(net_dow_cat_ls_sum))
+#writeWorksheet(exc, input2, sheet = "AS_categories", startRow = 1, startCol = 1)
+saveWorkbook(exc)
+colnames(keepfor2018)
+
+#manual adjustments made for networks that are new and don't have overlap with AS or if we need to create new categories
+keepfor2018$newsbusiness<-ifelse(keepfor2018$network_no %in% ( ),1,keepfor2018$newsbusiness)
+keepfor2018$asian<-ifelse(keepfor2018$network_no %in% c( , ),1,0) #Adding new category for East Asian networks. Surprised this didn't exist already?
+keepfor2018$multicult<-ifelse(keepfor2018$network_no %in% c( ,  1, ),1,keepfor2018$multicult)
+keepfor2018$scitech<-ifelse(keepfor2018$network_no %in% ( ),1,keepfor2018$scitech) 
+keepfor2018$lifestyle<-ifelse(keepfor2018$network_no %in% ( ),1,keepfor2018$lifestyle)
+keepfor2018$cooking<-ifelse(keepfor2018$network_no %in% ( ),1,keepfor2018$cooking)
+keepfor2018$genentertain<-ifelse(keepfor2018$network_no %in% c(,),1,keepfor2018$genentertain)
+keepfor2018$hispanic<-ifelse(keepfor2018$network_no %in% c( ),1,keepfor2018$hispanic)
+keepfor2018$comedy<-ifelse(keepfor2018$network_no %in% c( ),1,keepfor2018$comedy)
+keepfor2018$childfamily<-ifelse(keepfor2018$network_no %in% c( ),1,keepfor2018$childfamily)
+keepfor2018$education<-ifelse(keepfor2018$network_no %in% c( ),1,keepfor2018$education)
+keepfor2018$religious<-ifelse(keepfor2018$network_no %in% c( ),1,keepfor2018$religious)
+
+############keep only the names that you need for 2018###
+almostdone<-keepfor2018[,!names(keepfor2018) %in% c("broadcastmajor","broadcastother","cable","cableother","premiumnetworks","southasian","network_name","network_name2018",
+                                                    "name","short_name")]
+################################################
+
+#remove n/a values!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+almostdone[is.na(almostdone)]<-0
+
+#merge almostdone back with the network names for 2018
+networks<-sql_q("select network_no, name as network_name, short_name from networks 
+                where linear_is_in_range ('2018-03-01',summarize_from_date,summarize_to_date)")
+
+FinalNetworkCats<-merge(almostdone,networks)
+
+
+  
+#commented out so as not to overwrite.
+#write.csv(FinalNetworkCats,"H:/corpanalytics/efancher/Demo Refresh/Refresh2018/2018 Changes/Network_Categories_for_2018Refresh.csv", row.names = F)
